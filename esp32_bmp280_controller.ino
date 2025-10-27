@@ -1,11 +1,10 @@
 #include <Wire.h>
-#include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP280.h>
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 
-Adafruit_BMP280 bme; // I2C
+Adafruit_BMP280 bmp; // I2C
 
 // Set your desired temperature and humidity setpoints
 float temperatureSetpoint = 25.0; // Celsius
@@ -22,9 +21,9 @@ void setup() {
   bool status;
 
   // default settings
-  status = bme.begin();
+  status = bmp.begin();
   if (!status) {
-    Serial.println("Could not find a valid BME280 sensor, check wiring!");
+    Serial.println("Could not find a valid BMP280 sensor, check wiring!");
     while (1);
   }
 
@@ -36,11 +35,10 @@ void setup() {
 }
 
 void loop() {
-  float temperature = bme.readTemperature();
-  float humidity = bme.readHumidity();
+  float temperature = bmp.readTemperature();
 
-  if (isnan(temperature) || isnan(humidity)) {
-    Serial.println(F("Failed to read from BME280 sensor!"));
+  if (isnan(temperature)) {
+    Serial.println(F("Failed to read from BMP280 sensor!"));
     return;
   }
 
@@ -57,18 +55,18 @@ void loop() {
     Serial.println("Heater OFF");
   }
 
-  Serial.print(F("Humidity: "));
-  Serial.print(humidity);
-  Serial.println(F("%"));
+  // Serial.print(F("Humidity: "));
+  // Serial.print(humidity);
+  // Serial.println(F("%"));
 
-  // Humidity control logic
-  if (humidity < humiditySetpoint) {
-    digitalWrite(HUMIDIFIER_PIN, HIGH); // Turn on humidifier
-    Serial.println("Humidifier ON");
-  } else {
-    digitalWrite(HUMIDIFIER_PIN, LOW); // Turn off humidifier
-    Serial.println("Humidifier OFF");
-  }
+  // // Humidity control logic
+  // if (humidity < humiditySetpoint) {
+  //   digitalWrite(HUMIDIFIER_PIN, HIGH); // Turn on humidifier
+  //   Serial.println("Humidifier ON");
+  // } else {
+  //   digitalWrite(HUMIDIFIER_PIN, LOW); // Turn off humidifier
+  //   Serial.println("Humidifier OFF");
+  // }
 
   delay(2000);
 }
