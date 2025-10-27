@@ -5,7 +5,7 @@
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 
-Adafruit_BME280 bme; // I2C
+Adafruit_BMP280 bme; // I2C
 
 // Set your desired temperature and humidity setpoints
 float temperatureSetpoint = 25.0; // Celsius
