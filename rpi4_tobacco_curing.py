@@ -24,7 +24,7 @@ import os
 from flask import Flask, jsonify, render_template_string
 
 # =============================
-# Flask App Initialization
+# LCD Configuration
 # =============================
 app = Flask(__name__)
 
@@ -34,17 +34,16 @@ app = Flask(__name__)
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Returns the current status of the curing process."""
-    min_temp = target_temperature - 2
-    max_temp = target_temperature + 2
+    stage_name = list(CURING_STAGES.keys())[current_stage_index]
+    setpoints = CURING_STAGES[stage_name]
     status = {
         "mode": current_mode,
-        "stage": list(CURING_STAGES.keys())[current_stage_index],
+        "stage": stage_name,
         "temperature": temperature,
         "humidity": humidity,
-        "target_temperature": target_temperature,
-        "min_temp": min_temp,
-        "max_temp": max_temp,
-        "heater_on": heater_on,
+        "target_temp": setpoints["temp"],
+        "min_temp": setpoints["min_temp"],
+        "max_temp": setpoints["max_temp"],
         "fan_on": fan_on,
         "dehumidifier_on": dehumidifier_on,
         "buzzer_on": buzzer_on
@@ -64,6 +63,20 @@ def set_stage():
     global current_stage_index
     current_stage_index = (current_stage_index + 1) % len(list(CURING_STAGES.keys()))
     return jsonify({"stage": list(CURING_STAGES.keys())[current_stage_index]})
+
+@app.route('/api/fan', methods=['POST'])
+def toggle_fan():
+    """Toggles the fan."""
+    global fan_on
+    fan_on = not fan_on
+    return jsonify({"fan_on": fan_on})
+
+@app.route('/api/dehumidifier', methods=['POST'])
+def toggle_dehumidifier():
+    """Toggles the dehumidifier."""
+    global dehumidifier_on
+    dehumidifier_on = not dehumidifier_on
+    return jsonify({"dehumidifier_on": dehumidifier_on})
 
 @app.route('/')
 def index():
@@ -90,17 +103,19 @@ def index():
                     <div class="status-item"><strong>Mode:</strong> <span id="mode"></span></div>
                     <div class="status-item"><strong>Stage:</strong> <span id="stage"></span></div>
                     <div class="status-item"><strong>Temperature:</strong> <span id="temperature"></span> &deg;C</div>
-                    <div class="status-item"><strong>Humidity:</strong> <span id="humidity"></span> %</div>
+                    <div class="status-item"><strong>Target Temp:</strong> <span id="target_temp"></span> &deg;C</div>
                     <div class="status-item"><strong>Min Temp:</strong> <span id="min_temp"></span> &deg;C</div>
                     <div class="status-item"><strong>Max Temp:</strong> <span id="max_temp"></span> &deg;C</div>
-                    <div class="status-item"><strong>Heater:</strong> <span id="heater_on"></span></div>
+                    <div class="status-item"><strong>Humidity:</strong> <span id="humidity"></span> %</div>
                     <div class="status-item"><strong>Fan:</strong> <span id="fan_on"></span></div>
                     <div class="status-item"><strong>Dehumidifier:</strong> <span id="dehumidifier_on"></span></div>
                     <div class="status-item"><strong>Buzzer:</strong> <span id="buzzer_on"></span></div>
                 </div>
                 <div class="controls">
                     <button id="toggle-mode">Toggle Mode</button>
-                    <button id="next-stage">Next Stage</button>
+                    <button id="next-stage" disabled>Next Stage</button>
+                    <button id="toggle-fan" disabled>Toggle Fan</button>
+                    <button id="toggle-dehumidifier" disabled>Toggle Dehumidifier</button>
                 </div>
             </div>
             <script>
@@ -111,13 +126,19 @@ def index():
                             document.getElementById('mode').textContent = data.mode;
                             document.getElementById('stage').textContent = data.stage;
                             document.getElementById('temperature').textContent = data.temperature.toFixed(1);
-                            document.getElementById('humidity').textContent = data.humidity.toFixed(1);
+                            document.getElementById('target_temp').textContent = data.target_temp.toFixed(1);
                             document.getElementById('min_temp').textContent = data.min_temp.toFixed(1);
                             document.getElementById('max_temp').textContent = data.max_temp.toFixed(1);
-                            document.getElementById('heater_on').textContent = data.heater_on ? 'ON' : 'OFF';
+                            document.getElementById('humidity').textContent = data.humidity.toFixed(1);
                             document.getElementById('fan_on').textContent = data.fan_on ? 'ON' : 'OFF';
                             document.getElementById('dehumidifier_on').textContent = data.dehumidifier_on ? 'ON' : 'OFF';
                             document.getElementById('buzzer_on').textContent = data.buzzer_on ? 'ON' : 'OFF';
+
+                            // Disable manual controls in AUTO mode
+                            const isAutoMode = data.mode === 'AUTO';
+                            document.getElementById('next-stage').disabled = isAutoMode;
+                            document.getElementById('toggle-fan').disabled = isAutoMode;
+                            document.getElementById('toggle-dehumidifier').disabled = isAutoMode;
                         });
                 }
 
@@ -131,6 +152,16 @@ def index():
                         .then(() => updateStatus());
                 });
 
+                document.getElementById('toggle-fan').addEventListener('click', () => {
+                    fetch('/api/fan', { method: 'POST' })
+                        .then(() => updateStatus());
+                });
+
+                document.getElementById('toggle-dehumidifier').addEventListener('click', () => {
+                    fetch('/api/dehumidifier', { method: 'POST' })
+                        .then(() => updateStatus());
+                });
+
                 setInterval(updateStatus, 2000);
                 updateStatus();
             </script>
@@ -139,9 +170,6 @@ def index():
         """
     )
 
-# =============================
-# LCD Configuration
-# =============================
 lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1,
 cols=20, rows=4, dotsize=8)
 
@@ -149,11 +177,8 @@ cols=20, rows=4, dotsize=8)
 # Pin definitions (BCM numbering)
 # =============================
 DHT_PIN = board.D4 # DHT sensor data pin connected to GPIO 4
-FAN_PIN_1 = 17
-FAN_PIN_2 = 18
-DEHUMIDIFIER_PIN_1 = 27
-DEHUMIDIFIER_PIN_2 = 23
-HEATER_PIN = 22
+FAN_PIN = 17
+DEHUMIDIFIER_PIN = 27
 BUZZER_PIN = 24
 
 # Button definitions
@@ -176,16 +201,16 @@ MANUAL_MODE_LED_PIN = 25
 # =============================
 # Set this to True if your relays are active LOW (most common)
 # Set to False if active HIGH
-RELAY_ACTIVE_LOW = True
+RELAY_ACTIVE_LOW = False
 
 # =============================
 # Curing stages configuration
 # =============================
 CURING_STAGES = {
-    "YELLOWING": {"max_temp": 42.0, "humidity": 85.0},
-    "LEAF_DRYING": {"max_temp": 55.0, "humidity": 70.0},
-    "MIDRIB_DRYING": {"max_temp": 70.0, "humidity": 50.0},
-    "ORDERING": {"temp": 25.0, "humidity": 80.0},
+    "YELLOWING": {"temp": 35.0, "min_temp": 33.0, "max_temp": 37.0, "humidity": 85.0, "duration_hours": 48},
+    "LEAF_DRYING": {"temp": 46.0, "min_temp": 44.0, "max_temp": 48.0, "humidity": 70.0, "duration_hours": 24},
+    "MIDRIB_DRYING": {"temp": 65.0, "min_temp": 63.0, "max_temp": 67.0, "humidity": 50.0, "duration_hours": 24},
+    "ORDERING": {"temp": 25.0, "min_temp": 23.0, "max_temp": 27.0, "humidity": 80.0, "duration_hours": 12},
 }
 
 # =============================
@@ -196,9 +221,7 @@ current_stage_index = 0
 stage_start_time = 0
 fan_on = False
 dehumidifier_on = False
-heater_on = False
 buzzer_on = False
-target_temperature = 0.0
 temperature = 0.0
 humidity = 0.0
 
@@ -208,14 +231,13 @@ humidity = 0.0
 def setup_gpio():
     """Sets up the GPIO pins."""
     GPIO.setmode(GPIO.BCM)
-
-    # Output pins for relays
-    GPIO.setup(FAN_PIN_1, GPIO.OUT)
-    GPIO.setup(FAN_PIN_2, GPIO.OUT)
-    GPIO.setup(DEHUMIDIFIER_PIN_1, GPIO.OUT)
-    GPIO.setup(DEHUMIDIFIER_PIN_2, GPIO.OUT)
-    GPIO.setup(HEATER_PIN, GPIO.OUT)
+    GPIO.setup(FAN_PIN, GPIO.OUT)
+    GPIO.setup(DEHUMIDIFIER_PIN, GPIO.OUT)
     GPIO.setup(BUZZER_PIN, GPIO.OUT)
+    GPIO.setup(MODE_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(STAGE_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(FAN_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(DEHUMIDIFIER_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
     # Output pins for LEDs
     GPIO.setup(YELLOWING_LED_PIN, GPIO.OUT)
@@ -225,18 +247,9 @@ def setup_gpio():
     GPIO.setup(AUTO_MODE_LED_PIN, GPIO.OUT)
     GPIO.setup(MANUAL_MODE_LED_PIN, GPIO.OUT)
 
-    # Input pins for buttons
-    GPIO.setup(MODE_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    GPIO.setup(STAGE_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    GPIO.setup(FAN_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    GPIO.setup(DEHUMIDIFIER_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
     # Initialize all relays OFF
-    relay_off(FAN_PIN_1)
-    relay_off(FAN_PIN_2)
-    relay_off(DEHUMIDIFIER_PIN_1)
-    relay_off(DEHUMIDIFIER_PIN_2)
-    relay_off(HEATER_PIN)
+    relay_off(FAN_PIN)
+    relay_off(DEHUMIDIFIER_PIN)
     GPIO.output(BUZZER_PIN, GPIO.LOW)
 
     # Initialize all LEDs OFF
@@ -248,15 +261,8 @@ def setup_gpio():
     GPIO.output(MANUAL_MODE_LED_PIN, GPIO.LOW)
 
 # =============================
-# Actuator Control Functions
+# Relay Control Functions
 # =============================
-def control_buzzer(buzzer_on):
-    """Controls the buzzer."""
-    if buzzer_on:
-        GPIO.output(BUZZER_PIN, GPIO.HIGH)
-    else:
-        GPIO.output(BUZZER_PIN, GPIO.LOW)
-
 def relay_on(pin):
     """Turns ON the relay depending on the relay logic type."""
     if RELAY_ACTIVE_LOW:
@@ -271,30 +277,50 @@ def relay_off(pin):
     else:
         GPIO.output(pin, GPIO.LOW)
 
-def update_relays(heater_on, dehumidifier_on, fan_on):
-    """Updates all relay states."""
-    if heater_on:
-        relay_on(HEATER_PIN)
+def control_buzzer(buzzer_on):
+    """Controls the buzzer."""
+    if buzzer_on:
+        GPIO.output(BUZZER_PIN, GPIO.HIGH)
     else:
-        relay_off(HEATER_PIN)
+        GPIO.output(BUZZER_PIN, GPIO.LOW)
 
+def update_relays(dehumidifier_on, fan_on):
+    """Updates all relay states."""
     if dehumidifier_on:
-        relay_on(DEHUMIDIFIER_PIN_1)
-        relay_on(DEHUMIDIFIER_PIN_2)
+        relay_on(DEHUMIDIFIER_PIN)
     else:
-        relay_off(DEHUMIDIFIER_PIN_1)
-        relay_off(DEHUMIDIFIER_PIN_2)
+        relay_off(DEHUMIDIFIER_PIN)
 
     if fan_on:
-        relay_on(FAN_PIN_1)
-        relay_on(FAN_PIN_2)
+        relay_on(FAN_PIN)
     else:
-        relay_off(FAN_PIN_1)
-        relay_off(FAN_PIN_2)
+        relay_off(FAN_PIN)
 
 # =============================
-# LED Control Logic
+# LCD Update Function
 # =============================
+def log_data(timestamp, temp, hum, stage, mode, fan_on, dehum_on, alarm_on):
+    """Logs the current state to a CSV file."""
+    log_file = 'curing_log.csv'
+    file_exists = os.path.isfile(log_file)
+    with open(log_file, 'a', newline='') as csvfile:
+        fieldnames = ['timestamp', 'temperature', 'humidity', 'stage', 'mode', 'fan_on', 'dehumidifier_on', 'alarm_on']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerow({
+            'timestamp': timestamp,
+            'temperature': temp,
+            'humidity': hum,
+            'stage': stage,
+            'mode': mode,
+            'fan_on': fan_on,
+            'dehumidifier_on': dehum_on,
+            'alarm_on': alarm_on
+        })
+
 def update_leds(stage_name, mode):
     """Updates the LED indicators for stage and mode."""
     # Turn off all stage LEDs first
@@ -321,65 +347,35 @@ def update_leds(stage_name, mode):
         GPIO.output(AUTO_MODE_LED_PIN, GPIO.LOW)
         GPIO.output(MANUAL_MODE_LED_PIN, GPIO.HIGH)
 
-# =============================
-# LCD Update Function
-# =============================
-def update_lcd(temp, hum, stage, mode, heater_on, fan_on, dehum_on, min_temp, max_temp):
+def update_lcd(temp, hum, stage, mode, fan_on, dehum_on):
     """Formats and writes the current status to the LCD screen."""
-    lcd.home()
+    lcd.clear()
 
-    # Line 1: Temperature
-    lcd.write_string(f"Temp:{temp:.1f} R:{min_temp:.1f}-{max_temp:.1f}")
+    # Line 1: Temperature and Mode
+    lcd.write_string(f"Temp: {temp:.1f} C")
+    lcd.cursor_pos = (0, 14)
+    lcd.write_string(f"M:{mode[:3]}")
 
     # Line 2: Humidity
     lcd.crlf()
     lcd.write_string(f"Humidity: {hum:.1f} %")
 
-    # Line 3: Stage and Mode
+    # Line 3: Stage
     lcd.crlf()
     lcd.write_string(f"Stage: {stage}")
-    lcd.cursor_pos = (2, 14)
-    lcd.write_string(f"M:{mode[:3]}")
 
     # Line 4: Actuator Status
     lcd.crlf()
-    heater_str = "H" if heater_on else "-"
     fan_str = "F" if fan_on else "-"
     dehum_str = "D" if dehum_on else "-"
-    lcd.write_string(f"Status: {heater_str}{fan_str}{dehum_str}")
-
-# =============================
-# Data Logging
-# =============================
-def log_data(timestamp, temp, hum, stage, mode, heater_on, fan_on, dehum_on, alarm_on):
-    """Logs the current state to a CSV file."""
-    log_file = 'curing_log.csv'
-    file_exists = os.path.isfile(log_file)
-    with open(log_file, 'a', newline='') as csvfile:
-        fieldnames = ['timestamp', 'temperature', 'humidity', 'stage', 'mode', 'heater_on', 'fan_on', 'dehumidifier_on', 'alarm_on']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        if not file_exists:
-            writer.writeheader()
-
-        writer.writerow({
-            'timestamp': timestamp,
-            'temperature': temp,
-            'humidity': hum,
-            'stage': stage,
-            'mode': mode,
-            'heater_on': heater_on,
-            'fan_on': fan_on,
-            'dehumidifier_on': dehum_on,
-            'alarm_on': alarm_on
-        })
+    lcd.write_string(f"Status: {fan_str}{dehum_str}")
 
 # =============================
 # Main Control Loop
 # =============================
 def main():
     """Main loop for the tobacco curing controller."""
-    global current_mode, current_stage_index, stage_start_time, fan_on, dehumidifier_on, heater_on, target_temperature, buzzer_on, temperature, humidity
+    global current_mode, current_stage_index, stage_start_time, fan_on, dehumidifier_on, buzzer_on, temperature, humidity
 
     setup_gpio()
     dht_device = adafruit_dht.DHT22(DHT_PIN)
@@ -389,8 +385,6 @@ def main():
     last_stage_press = 0
     last_fan_press = 0
     last_dehumidifier_press = 0
-    last_temp_increase_time = time.time()
-    initial_temp_set = False
 
     try:
         lcd.clear()
@@ -406,7 +400,6 @@ def main():
                 last_mode_press = time.time()
                 current_mode = "MANUAL" if current_mode == "AUTO" else "AUTO"
                 print(f"Switched to {current_mode} mode")
-                initial_temp_set = False
 
             # Sensor reading
             try:
@@ -416,34 +409,22 @@ def main():
                     stage_name = stage_keys[current_stage_index]
                     setpoints = CURING_STAGES[stage_name]
 
-                    if not initial_temp_set:
-                        if stage_name in ["YELLOWING", "LEAF_DRYING", "MIDRIB_DRYING"]:
-                            target_temperature = temperature
-                        else:  # ORDERING
-                            target_temperature = setpoints.get("temp", temperature)
-                        initial_temp_set = True
-                        last_temp_increase_time = time.time()
-
                     # Stage transition and control logic
                     if current_mode == "AUTO":
-                        if stage_name in ["YELLOWING", "LEAF_DRYING", "MIDRIB_DRYING"]:
-                            if time.time() - last_temp_increase_time >= 3600:  # 1 hour
-                                if target_temperature < setpoints["max_temp"]:
-                                    target_temperature += 1.0
-                                    print(f"Increased target temperature to: {target_temperature:.1f}°C")
-                                last_temp_increase_time = time.time()
+                        stage_duration_seconds = setpoints["duration_hours"] * 3600
+                        if time.time() - stage_start_time > stage_duration_seconds:
+                            current_stage_index = (current_stage_index + 1) % len(stage_keys)
+                            stage_start_time = time.time()
+                            print(f"Auto-advancing to stage: {stage_keys[current_stage_index]}")
 
-                        loop_target_temperature = target_temperature
-                        heater_on = temperature < loop_target_temperature
                         dehumidifier_on = humidity > setpoints["humidity"]
                         fan_on = dehumidifier_on or (stage_name == "LEAF_DRYING")
-                    else:  # MANUAL mode
+                    else: # MANUAL mode
                         if stage_button_pressed and (time.time() - last_stage_press > 0.2):
                             last_stage_press = time.time()
                             current_stage_index = (current_stage_index + 1) % len(stage_keys)
                             stage_start_time = time.time()
                             print(f"Manually advanced to stage: {stage_keys[current_stage_index]}")
-                            initial_temp_set = False
 
                         if fan_button_pressed and (time.time() - last_fan_press > 0.2):
                             last_fan_press = time.time()
@@ -453,34 +434,30 @@ def main():
                             last_dehumidifier_press = time.time()
                             dehumidifier_on = not dehumidifier_on
 
-                        loop_target_temperature = setpoints.get("max_temp", setpoints.get("temp", temperature))
-                        heater_on = temperature < loop_target_temperature
-
-                    # Update relays (fan, dehumidifier, heater)
-                    update_relays(heater_on, dehumidifier_on, fan_on)
+                    # Update relays (fan, dehumidifier)
+                    update_relays(dehumidifier_on, fan_on)
 
                     # Update LED indicators
                     update_leds(stage_name, current_mode)
 
-                    min_temp = loop_target_temperature - 2
-                    max_temp = loop_target_temperature + 2
-                    buzzer_on = not (min_temp <= temperature <= max_temp)
+                    # Temperature alarm
+                    buzzer_on = not (setpoints["min_temp"] <= temperature <= setpoints["max_temp"])
                     control_buzzer(buzzer_on)
 
                     # Update LCD display
-                    update_lcd(temperature, humidity, stage_name, current_mode, heater_on, fan_on, dehumidifier_on, min_temp, max_temp)
+                    update_lcd(temperature, humidity, stage_name, current_mode, fan_on, dehumidifier_on)
 
                     # Console feedback
                     print(f"Stage: {stage_name}, Mode: {current_mode}, Temp: {temperature:.1f}°C, Hum: {humidity:.1f}%")
-                    print(f"Heater: {'ON' if heater_on else 'OFF'}, Dehumidifier: {'ON' if dehumidifier_on else 'OFF'}, Fan: {'ON' if fan_on else 'OFF'}")
+                    print(f"Dehumidifier: {'ON' if dehumidifier_on else 'OFF'}, Fan: {'ON' if fan_on else 'OFF'}")
 
                     # Log data
-                    log_data(time.time(), temperature, humidity, stage_name, current_mode, heater_on, fan_on, dehumidifier_on, buzzer_on)
+                    log_data(time.time(), temperature, humidity, stage_name, current_mode, fan_on, dehumidifier_on, buzzer_on)
 
             except RuntimeError as error:
                 print(error.args[0])
 
-            time.sleep(2)
+            time.sleep(0.5)
     finally:
         lcd.clear()
         GPIO.cleanup()
@@ -494,4 +471,4 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
 
-main()
+    main()
