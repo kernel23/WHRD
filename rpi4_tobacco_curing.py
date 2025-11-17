@@ -7,6 +7,14 @@
 # pip3 install adafruit-circuitpython-dht
 # pip3 install RPLCD
 
+from gpiozero import Device, Servo
+from gpiozero.pins.mock import MockFactory, MockPWMPin
+import os
+
+# If using the mock factory, configure all pins to be mock PWM pins
+if os.environ.get('GPIOZERO_PIN_FACTORY') == 'mock':
+    Device.pin_factory = MockFactory(pin_class=MockPWMPin)
+
 try:
     import RPi.GPIO as GPIO
     import board
@@ -62,9 +70,23 @@ def get_status():
         "buzzer_on": buzzer_on,
         "remaining_seconds": remaining_seconds,
         "uptime": uptime,
-        "current_time": current_time
+        "current_time": current_time,
+        "servo_position": servo_position
     }
     return jsonify(status)
+
+
+@app.route('/api/servo', methods=['POST'])
+def toggle_servo():
+    """Toggles the servo position."""
+    global servo_position
+    if servo_position == 0:
+        servo_position = 45
+    elif servo_position == 45:
+        servo_position = 90
+    else:
+        servo_position = 0
+    return jsonify({"servo_position": servo_position})
 
 
 @app.route('/api/mode', methods=['POST'])
@@ -134,12 +156,14 @@ def index():
                     <div class="status-item"><strong>Fan 2:</strong> <span id="fan_on_2"></span></div>
                     <div class="status-item"><strong>Dehumidifier 2:</strong> <span id="dehumidifier_on_2"></span></div>
                     <div class="status-item"><strong>Buzzer:</strong> <span id="buzzer_on"></span></div>
+                    <div class="status-item"><strong>Flue Gas:</strong> <span id="servo_position"></span></div>
                 </div>
                 <div class="controls">
                     <button id="toggle-mode">Toggle Mode</button>
                     <button id="next-stage">Next Stage</button>
                     <button id="toggle-fan" disabled>Toggle Fan</button>
                     <button id="toggle-dehumidifier" disabled>Toggle Dehumidifier</button>
+                    <button id="toggle-servo">Toggle Flue Gas</button>
                 </div>
             </div>
             <script>
@@ -158,6 +182,7 @@ def index():
                             document.getElementById('fan_on_2').textContent = data.fan_on_2 ? 'ON' : 'OFF';
                             document.getElementById('dehumidifier_on_2').textContent = data.dehumidifier_on_2 ? 'ON' : 'OFF';
                             document.getElementById('buzzer_on').textContent = data.buzzer_on ? 'ON' : 'OFF';
+                            document.getElementById('servo_position').textContent = data.servo_position;
 
                             const uptime_hours = Math.floor(data.uptime / 3600);
                             const uptime_minutes = Math.floor((data.uptime % 3600) / 60);
@@ -200,6 +225,11 @@ def index():
                         .then(() => updateStatus());
                 });
 
+                document.getElementById('toggle-servo').addEventListener('click', () => {
+                    fetch('/api/servo', { method: 'POST' })
+                        .then(() => updateStatus());
+                });
+
                 setInterval(updateStatus, 2000);
                 updateStatus();
             </script>
@@ -226,6 +256,10 @@ MODE_BUTTON_PIN = 5
 STAGE_BUTTON_PIN = 6
 FAN_BUTTON_PIN = 13
 DEHUMIDIFIER_BUTTON_PIN = 19
+SERVO_BUTTON_PIN = 26
+
+# Servo motor definitions
+SERVO_PIN = 18
 
 # LED Indicator definitions
 YELLOWING_LED_PIN = 16
@@ -266,6 +300,7 @@ dehumidifier_on = False
 buzzer_on = False
 temperature = 0.0
 humidity = 0.0
+servo_position = 0
 
 # =============================
 # GPIO Setup
@@ -282,6 +317,7 @@ def setup_gpio():
     GPIO.setup(STAGE_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(FAN_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(DEHUMIDIFIER_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(SERVO_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
     # Output pins for LEDs
     GPIO.setup(YELLOWING_LED_PIN, GPIO.OUT)
@@ -428,7 +464,7 @@ def update_lcd(temp, hum, stage, mode, fan_on, dehum_on):
 # =============================
 def main():
     """Main loop for the tobacco curing controller."""
-    global current_mode, current_stage_index, stage_start_time, fan_on, dehumidifier_on, buzzer_on, temperature, humidity, stage_start_temp, auto_target_temp
+    global current_mode, current_stage_index, stage_start_time, fan_on, dehumidifier_on, buzzer_on, temperature, humidity, stage_start_temp, auto_target_temp, servo_position
 
     setup_gpio()
     dht_device = adafruit_dht.DHT22(DHT_PIN)
@@ -454,6 +490,7 @@ def main():
     last_stage_press = 0
     last_fan_press = 0
     last_dehumidifier_press = 0
+    last_servo_press = 0
 
     # Initialize temperature state variables
     stage_start_temp = temperature
@@ -461,12 +498,32 @@ def main():
 
     try:
         lcd.clear()
+        servo = Servo(SERVO_PIN)
+        servo.value = -1  # Initial position (0 degrees)
         while True:
             # Button reading
             mode_button_pressed = not GPIO.input(MODE_BUTTON_PIN)
             stage_button_pressed = not GPIO.input(STAGE_BUTTON_PIN)
             fan_button_pressed = not GPIO.input(FAN_BUTTON_PIN)
             dehumidifier_button_pressed = not GPIO.input(DEHUMIDIFIER_BUTTON_PIN)
+            servo_button_pressed = not GPIO.input(SERVO_BUTTON_PIN)
+
+            # Servo control
+            if servo_button_pressed and (time.time() - last_servo_press > 0.2):
+                last_servo_press = time.time()
+                if servo_position == 0:
+                    servo_position = 45
+                elif servo_position == 45:
+                    servo_position = 90
+                else:
+                    servo_position = 0
+
+            if servo_position == 0:
+                servo.value = -1
+            elif servo_position == 45:
+                servo.value = -0.5
+            elif servo_position == 90:
+                servo.value = 0
 
             # Mode switching
             if mode_button_pressed and (time.time() - last_mode_press > 0.2):
