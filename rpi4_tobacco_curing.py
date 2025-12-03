@@ -21,7 +21,8 @@ import time
 import threading
 import csv
 import os
-from flask import Flask, jsonify, render_template_string
+import json
+from flask import Flask, jsonify, render_template
 from datetime import datetime
 
 # =============================
@@ -98,115 +99,7 @@ def toggle_dehumidifier():
 @app.route('/')
 def index():
     """Serves the main HTML page."""
-    return render_template_string(
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Tobacco Curing Control</title>
-            <style>
-                body { font-family: sans-serif; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                .status { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-                .status-item { padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-                .controls { margin-top: 20px; }
-                .controls button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <div><strong>Uptime:</strong> <span id="uptime"></span></div>
-                    <div><strong>Time:</strong> <span id="current_time"></span></div>
-                </div>
-                <h1>Tobacco Curing Control</h1>
-                <div class="status">
-                    <div class="status-item"><strong>Mode:</strong> <span id="mode"></span></div>
-                    <div class="status-item"><strong>Stage:</strong> <span id="stage"></span></div>
-                    <div class="status-item"><strong>Temperature:</strong> <span id="temperature"></span> &deg;C</div>
-                    <div class="status-item"><strong>Target Temp:</strong> <span id="target_temp"></span> &deg;C</div>
-                    <div class="status-item"><strong>Max Temp:</strong> <span id="max_temp"></span> &deg;C</div>
-                    <div class="status-item"><strong>Next Temp Increase:</strong> <span id="next_temp_increase"></span></div>
-                    <div class="status-item"><strong>Humidity:</strong> <span id="humidity"></span> %</div>
-                    <div class="status-item"><strong>Fan 1:</strong> <span id="fan_on"></span></div>
-                    <div class="status-item"><strong>Dehumidifier 1:</strong> <span id="dehumidifier_on"></span></div>
-                    <div class="status-item"><strong>Fan 2:</strong> <span id="fan_on_2"></span></div>
-                    <div class="status-item"><strong>Dehumidifier 2:</strong> <span id="dehumidifier_on_2"></span></div>
-                    <div class="status-item"><strong>Buzzer:</strong> <span id="buzzer_on"></span></div>
-                </div>
-                <div class="controls">
-                    <button id="toggle-mode">Toggle Mode</button>
-                    <button id="next-stage">Next Stage</button>
-                    <button id="toggle-fan" disabled>Toggle Fan</button>
-                    <button id="toggle-dehumidifier" disabled>Toggle Dehumidifier</button>
-                </div>
-            </div>
-            <script>
-                function updateStatus() {
-                    fetch('/api/status')
-                        .then(response => response.json())
-                        .then(data => {
-                            document.getElementById('mode').textContent = data.mode;
-                            document.getElementById('stage').textContent = data.stage;
-                            document.getElementById('temperature').textContent = data.temperature.toFixed(1);
-                            document.getElementById('target_temp').textContent = data.target_temp.toFixed(1);
-                            document.getElementById('max_temp').textContent = data.max_temp.toFixed(1);
-                            document.getElementById('humidity').textContent = data.humidity.toFixed(1);
-                            document.getElementById('fan_on').textContent = data.fan_on ? 'ON' : 'OFF';
-                            document.getElementById('dehumidifier_on').textContent = data.dehumidifier_on ? 'ON' : 'OFF';
-                            document.getElementById('fan_on_2').textContent = data.fan_on_2 ? 'ON' : 'OFF';
-                            document.getElementById('dehumidifier_on_2').textContent = data.dehumidifier_on_2 ? 'ON' : 'OFF';
-                            document.getElementById('buzzer_on').textContent = data.buzzer_on ? 'ON' : 'OFF';
-
-                            const uptime_hours = Math.floor(data.uptime / 3600);
-                            const uptime_minutes = Math.floor((data.uptime % 3600) / 60);
-                            const uptime_seconds = Math.floor(data.uptime % 60);
-                            document.getElementById('uptime').textContent = `${uptime_hours.toString().padStart(2, '0')}:${uptime_minutes.toString().padStart(2, '0')}:${uptime_seconds.toString().padStart(2, '0')}`;
-                            document.getElementById('current_time').textContent = data.current_time;
-
-                            if (data.mode === 'AUTO') {
-                                const minutes = Math.floor(data.remaining_seconds / 60);
-                                const seconds = Math.floor(data.remaining_seconds % 60);
-                                document.getElementById('next_temp_increase').textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                            } else {
-                                document.getElementById('next_temp_increase').textContent = 'N/A';
-                            }
-
-                            // Disable manual controls in AUTO mode
-                            const isAutoMode = data.mode === 'AUTO';
-                            document.getElementById('toggle-fan').disabled = isAutoMode;
-                            document.getElementById('toggle-dehumidifier').disabled = isAutoMode;
-                        });
-                }
-
-                document.getElementById('toggle-mode').addEventListener('click', () => {
-                    fetch('/api/mode', { method: 'POST' })
-                        .then(() => updateStatus());
-                });
-
-                document.getElementById('next-stage').addEventListener('click', () => {
-                    fetch('/api/stage', { method: 'POST' })
-                        .then(() => updateStatus());
-                });
-
-                document.getElementById('toggle-fan').addEventListener('click', () => {
-                    fetch('/api/fan', { method: 'POST' })
-                        .then(() => updateStatus());
-                });
-
-                document.getElementById('toggle-dehumidifier').addEventListener('click', () => {
-                    fetch('/api/dehumidifier', { method: 'POST' })
-                        .then(() => updateStatus());
-                });
-
-                setInterval(updateStatus, 2000);
-                updateStatus();
-            </script>
-        </body>
-        </html>
-        """
-    )
+    return render_template('index.html')
 
 lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1,
 cols=20, rows=4, dotsize=8)
@@ -252,6 +145,35 @@ CURING_STAGES = {
     "MIDRIB_DRYING": {"min_temp": 60.0, "max_temp": 70.0, "humidity": 50.0, "ramp_fan_on": True},
     "ORDERING": {"min_temp": 23.0, "max_temp": 27.0, "humidity": 80.0, "ramp_fan_on": False},
 }
+
+# =============================
+# State persistence
+# =============================
+STATE_FILE = "curing_state.json"
+
+def save_state():
+    """Saves the current state to a file."""
+    state = {
+        "current_mode": current_mode,
+        "current_stage_index": current_stage_index,
+        "auto_target_temp": auto_target_temp,
+        "stage_start_time": stage_start_time,
+    }
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+def load_state():
+    """Loads the state from a file."""
+    global current_mode, current_stage_index, auto_target_temp, stage_start_time
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+            current_mode = state.get("current_mode", "AUTO")
+            current_stage_index = state.get("current_stage_index", 0)
+            auto_target_temp = state.get("auto_target_temp", 0.0)
+            stage_start_time = state.get("stage_start_time", time.time())
+    except FileNotFoundError:
+        pass # No state file yet, start with defaults
 
 # =============================
 # State variables
@@ -431,10 +353,20 @@ def main():
     global current_mode, current_stage_index, stage_start_time, fan_on, dehumidifier_on, buzzer_on, temperature, humidity, stage_start_temp, auto_target_temp
 
     setup_gpio()
+
+    # Splash screen
+    lcd.clear()
+    lcd.write_string("Tobacco Curing Sys")
+    lcd.crlf()
+    lcd.write_string("Initializing...")
+    time.sleep(3)
+    lcd.clear()
+
     dht_device = adafruit_dht.DHT22(DHT_PIN)
 
     # Perform an initial sensor reading to ensure we start with valid data
     print("Getting initial sensor reading...")
+    lcd.write_string("Reading sensor...")
     temperature = None
     while temperature is None:
         try:
@@ -442,22 +374,37 @@ def main():
             humidity = dht_device.humidity
             if temperature is None:
                 print("Failed to get initial DHT22 reading, retrying...")
+                lcd.clear()
+                lcd.write_string("Sensor fail!")
+                lcd.crlf()
+                lcd.write_string("Retrying...")
                 time.sleep(2)
         except RuntimeError as error:
             print(f"Initial sensor read error: {error.args[0]}. Retrying...")
+            lcd.clear()
+            lcd.write_string("Sensor error!")
+            lcd.crlf()
+            lcd.write_string("Retrying...")
             time.sleep(2)
     print(f"Initial reading: Temp={temperature:.1f}C, Hum={humidity:.1f}%")
+    lcd.clear()
+    lcd.write_string("Sensor OK!")
+    time.sleep(2)
+    lcd.clear()
 
     stage_keys = list(CURING_STAGES.keys())
-    stage_start_time = time.time()
     last_mode_press = 0
     last_stage_press = 0
     last_fan_press = 0
     last_dehumidifier_press = 0
 
+    load_state() # Load the last saved state
+
     # Initialize temperature state variables
     stage_start_temp = temperature
-    auto_target_temp = stage_start_temp + 1.0
+    if stage_start_time == 0:
+        stage_start_time = time.time()
+    auto_target_temp = stage_start_temp + 1.0 if auto_target_temp == 0.0 else auto_target_temp
 
     try:
         lcd.clear()
@@ -554,8 +501,10 @@ def main():
             except RuntimeError as error:
                 print(error.args[0])
 
+            save_state() # Periodically save the state
             time.sleep(0.5)
     finally:
+        save_state() # Save state on exit
         lcd.clear()
         GPIO.cleanup()
 
